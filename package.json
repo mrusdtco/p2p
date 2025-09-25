@@ -1,5 +1,4 @@
 {
- 
   "name": "p2p-dashboard-server",
   "version": "1.0.0",
   "description": "Backend seguro para obtener precios P2P de exchanges.",
@@ -15,6 +14,7 @@
   "author": "Freddy",
   "license": "ISC"
 }
+
 
 
 
