@@ -2,6 +2,7 @@
 // ARCHIVO: server.js (BACKEND)
 // PROPÓSITO: Este es tu servidor seguro que obtiene los precios.
 // DESTINO: Debe ser desplegado en VERCEL.
+// CORRECCIÓN: Se ajustó la configuración de CORS y se corrigió la firma de OKX.
 // -------------------------------------------------------------------
 
 const express = require('express');
@@ -12,10 +13,19 @@ const crypto = require('crypto');
 const app = express();
 
 // --- Configuración de CORS ---
-// Esto permite que tu frontend en mrusdt.co se comunique con este servidor.
+// Lista de dominios permitidos para conectarse a este servidor.
+const allowedOrigins = ['https://www.mrusdt.co', 'http://localhost:3000'];
+
 const corsOptions = {
-  origin: ['https://www.mrusdt.co', 'http://localhost:3000'], // Permite tu dominio y el desarrollo local
-  optionsSuccessStatus: 200
+  origin: (origin, callback) => {
+    // Permite peticiones sin 'origin' (como las de Postman o apps móviles)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = 'La política de CORS para este sitio no permite acceso desde el origen especificado.';
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  }
 };
 app.use(cors(corsOptions));
 
@@ -31,7 +41,8 @@ const apiKeys = {
 // --- HELPERS DE FIRMA ---
 const getOkxSignature = (timestamp, method, requestPath, body = '') => {
     const message = `${timestamp}${method.toUpperCase()}${requestPath}${body}`;
-    return crypto.createHmac('sha26', apiKeys.okx.secret).update(message).digest('base64');
+    // CORRECCIÓN: Se cambió 'sha26' por el correcto 'sha256'
+    return crypto.createHmac('sha256', apiKeys.okx.secret).update(message).digest('base64');
 };
 
 // --- FUNCIONES PARA OBTENER PRECIOS ---
@@ -43,7 +54,7 @@ async function getBinancePrices() {
 
         const buyPayload = { page: 1, rows: 5, payTypes: [], countries: ["CO"], tradeType: "BUY", asset: "USDT", fiat: "COP", publisherType: null };
         const buyResponse = await axios.post(url, buyPayload, config);
-        const priceToSell = parseFloat(buyResponse.data.data[0].adv.price);
+        const priceToSell = parseFloat(buyResponse.data.data[0].adv.price); 
 
         const sellPayload = { page: 1, rows: 5, payTypes: [], countries: ["CO"], tradeType: "SELL", asset: "USDT", fiat: "COP", publisherType: null };
         const sellResponse = await axios.post(url, sellPayload, config);
@@ -59,7 +70,7 @@ async function getBinancePrices() {
 async function getBybitPrices() {
      try {
         const url = 'https://api2.bybit.com/fiat/otc/ads/list';
-
+        
         const buyParams = { tokenId: 'USDT', currencyId: 'COP', payment: [], side: '1', size: '5', page: '1' };
         const buyResponse = await axios.get(url, { params: buyParams });
         const priceToSell = parseFloat(buyResponse.data.result.items[0].price);
@@ -83,7 +94,7 @@ async function getOkxPrices() {
         const baseUrl = 'https://www.okx.com';
         const requestPath = '/api/v5/p2p/public/orders-list';
         const method = 'GET';
-
+        
         const fetchSide = async (side) => {
             const timestamp = new Date().toISOString();
             const signature = getOkxSignature(timestamp, method, requestPath);
@@ -133,3 +144,4 @@ app.get('/api/prices', async (req, res) => {
 
 // Vercel exporta la app, no necesita `app.listen`
 module.exports = app;
+
