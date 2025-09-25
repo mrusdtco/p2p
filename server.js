@@ -2,7 +2,7 @@
 // ARCHIVO: server.js (BACKEND)
 // PROPÓSITO: Este es tu servidor seguro que obtiene los precios.
 // DESTINO: Debe ser desplegado en VERCEL.
-// CORRECCIÓN: Se ajustó la configuración de CORS y se corrigió la firma de OKX.
+// CORRECCIÓN: Se añade User-Agent para Bybit y logging mejorado para OKX.
 // -------------------------------------------------------------------
 
 const express = require('express');
@@ -13,18 +13,14 @@ const crypto = require('crypto');
 const app = express();
 
 // --- Configuración de CORS ---
-// Lista de dominios permitidos para conectarse a este servidor.
 const allowedOrigins = ['https://www.mrusdt.co', 'http://localhost:3000'];
-
 const corsOptions = {
   origin: (origin, callback) => {
-    // Permite peticiones sin 'origin' (como las de Postman o apps móviles)
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) === -1) {
-      const msg = 'La política de CORS para este sitio no permite acceso desde el origen especificado.';
-      return callback(new Error(msg), false);
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
     }
-    return callback(null, true);
   }
 };
 app.use(cors(corsOptions));
@@ -41,7 +37,8 @@ const apiKeys = {
 // --- HELPERS DE FIRMA ---
 const getOkxSignature = (timestamp, method, requestPath, body = '') => {
     const message = `${timestamp}${method.toUpperCase()}${requestPath}${body}`;
-    // CORRECCIÓN: Se cambió 'sha26' por el correcto 'sha256'
+    // Logging para depuración
+    console.log(`OKX Signature String: [${message}]`);
     return crypto.createHmac('sha256', apiKeys.okx.secret).update(message).digest('base64');
 };
 
@@ -49,6 +46,7 @@ const getOkxSignature = (timestamp, method, requestPath, body = '') => {
 
 async function getBinancePrices() {
     try {
+        console.log("Attempting to fetch Binance prices...");
         const url = 'https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search';
         const config = { headers: { "Content-Type": "application/json" } };
 
@@ -59,35 +57,43 @@ async function getBinancePrices() {
         const sellPayload = { page: 1, rows: 5, payTypes: [], countries: ["CO"], tradeType: "SELL", asset: "USDT", fiat: "COP", publisherType: null };
         const sellResponse = await axios.post(url, sellPayload, config);
         const priceToBuy = parseFloat(sellResponse.data.data[0].adv.price);
-
+        
+        console.log("Successfully fetched Binance prices.");
         return { priceToSell, priceToBuy };
     } catch (error) {
-        console.error('Error fetching Binance prices:', error.message);
+        console.error('ERROR fetching Binance prices:', error.message);
         return null;
     }
 }
 
 async function getBybitPrices() {
      try {
+        console.log("Attempting to fetch Bybit prices...");
         const url = 'https://api2.bybit.com/fiat/otc/ads/list';
-        
+        const headers = {
+            // Se añade un User-Agent para simular un navegador y evitar bloqueos 403
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        };
+
         const buyParams = { tokenId: 'USDT', currencyId: 'COP', payment: [], side: '1', size: '5', page: '1' };
-        const buyResponse = await axios.get(url, { params: buyParams });
+        const buyResponse = await axios.get(url, { params: buyParams, headers: headers });
         const priceToSell = parseFloat(buyResponse.data.result.items[0].price);
 
         const sellParams = { tokenId: 'USDT', currencyId: 'COP', payment: [], side: '0', size: '5', page: '1' };
-        const sellResponse = await axios.get(url, { params: sellParams });
+        const sellResponse = await axios.get(url, { params: sellParams, headers: headers });
         const priceToBuy = parseFloat(sellResponse.data.result.items[0].price);
 
+        console.log("Successfully fetched Bybit prices.");
         return { priceToSell, priceToBuy };
     } catch (error) {
-        console.error('Error fetching Bybit prices:', error.message);
+        console.error('ERROR fetching Bybit prices:', error.message);
         return null;
     }
 }
 
 async function getOkxPrices() {
     try {
+        console.log("Attempting to fetch OKX prices...");
         if (!apiKeys.okx.key || !apiKeys.okx.secret || !apiKeys.okx.passphrase) {
             throw new Error("OKX API credentials not configured in environment variables.");
         }
@@ -108,21 +114,24 @@ async function getOkxPrices() {
             const params = { ccy: 'USDT-COP', side: side, paymentMethod: 'all', userType: 'all', limit: 5 };
             const response = await axios.get(`${baseUrl}${requestPath}`, { headers, params });
             const items = response.data.data.list;
+            if (!items || items.length === 0) throw new Error(`No orders found for side: ${side}`);
             return parseFloat(items[items.length - 1].price);
         };
 
         const priceToSell = await fetchSide('buy');
         const priceToBuy = await fetchSide('sell');
-
+        
+        console.log("Successfully fetched OKX prices.");
         return { priceToSell, priceToBuy };
     } catch (error) {
-        console.error('Error fetching OKX prices:', error.response ? error.response.data : error.message);
+        console.error('ERROR fetching OKX prices:', error.response ? JSON.stringify(error.response.data) : error.message);
         return null;
     }
 }
 
 // RUTA DE LA API
 app.get('/api/prices', async (req, res) => {
+    console.log("--- Request received at /api/prices ---");
     try {
         const [binance, bybit, okx] = await Promise.all([
             getBinancePrices(),
@@ -130,14 +139,19 @@ app.get('/api/prices', async (req, res) => {
             getOkxPrices()
         ]);
 
-        res.json({
+        const responseData = {
             binancep2p: binance,
             bybitp2p: bybit,
             okx: okx,
             kucoin: null,
             bitget: null
-        });
+        };
+        
+        console.log("--- Successfully fetched all data, sending response. ---");
+        res.status(200).json(responseData);
+
     } catch (error) {
+        console.error("--- FATAL ERROR in /api/prices route: ---", error.message);
         res.status(500).json({ error: 'Failed to fetch prices from exchanges' });
     }
 });
