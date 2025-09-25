@@ -1,0 +1,16 @@
+{
+  "_comment": "ARCHIVO: vercel.json (CONFIGURACIÓN DE VERCEL). DESTINO: Vercel.",
+  "version": 2,
+  "builds": [
+    {
+      "src": "server.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "server.js"
+    }
+  ]
+}
